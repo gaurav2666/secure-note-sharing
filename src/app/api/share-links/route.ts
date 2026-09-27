@@ -10,7 +10,6 @@ import ShareLink from "@/models/ShareLink";
 
 export async function POST(request: Request) {
   try {
-    // 1. Check authentication
     const session = await auth.api.getSession({
       headers: await headers(),
     });
@@ -22,17 +21,10 @@ export async function POST(request: Request) {
       );
     }
 
-    // 2. Read request body
     const body = await request.json();
 
-    const {
-      noteId,
-      shareType,
-      accessType,
-      expiresAt,
-    } = body;
+    const { noteId, shareType, accessType, expiresAt } = body;
 
-    // 3. Validate required fields
     if (!noteId || !shareType || !accessType || !expiresAt) {
       return NextResponse.json(
         {
@@ -57,10 +49,8 @@ export async function POST(request: Request) {
       );
     }
 
-    // 4. Connect to database
     await connectDB();
 
-    // 5. Make sure the note belongs to the logged-in user
     const note = await Note.findOne({
       _id: noteId,
       ownerId: session.user.id,
@@ -73,7 +63,6 @@ export async function POST(request: Request) {
       );
     }
 
-    // 6. Validate expiry
     const expiryDate = new Date(expiresAt);
 
     if (isNaN(expiryDate.getTime())) {
@@ -90,19 +79,20 @@ export async function POST(request: Request) {
       );
     }
 
-    // 7. Generate cryptographically secure token
+    // Generate secure share token
     const token = crypto.randomBytes(32).toString("base64url");
 
     let accessKey: string | undefined;
     let passwordHash: string | undefined;
 
+    // Generate access key only for password-protected links
     if (accessType === "password") {
       accessKey = crypto.randomBytes(16).toString("base64url");
 
       passwordHash = await bcrypt.hash(accessKey, 12);
     }
 
-    // 8. Create ShareLink
+    // Create share link AFTER all values above have been prepared
     const shareLink = await ShareLink.create({
       noteId: note._id,
       ownerId: session.user.id,
@@ -111,37 +101,29 @@ export async function POST(request: Request) {
       accessType,
       expiresAt: expiryDate,
       passwordHash,
-
-      // View tracking
       viewCount: 0,
-
-      // Brute-force protection
       failedAttempts: 0,
       lockedUntil: null,
-
-      // Link state
       usedAt: null,
       revokedAt: null,
     });
 
-    // 9. Generate share URL
+    // Generate the share URL AFTER the share link/token exists
     const shareUrl = new URL(
       `/share/${token}`,
       request.url
     ).toString();
 
-    // 10. Return share link details
     return NextResponse.json(
       {
         message: "Share link created successfully",
+
         shareLink: {
           id: shareLink._id,
           shareUrl,
           shareType: shareLink.shareType,
           accessType: shareLink.accessType,
           expiresAt: shareLink.expiresAt,
-
-          // Only returned for password-protected links
           accessKey,
         },
       },
