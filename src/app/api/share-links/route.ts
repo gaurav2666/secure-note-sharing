@@ -10,7 +10,6 @@ import ShareLink from "@/models/ShareLink";
 
 export async function POST(request: Request) {
   try {
-    // 1. Check authentication
     const session = await auth.api.getSession({
       headers: await headers(),
     });
@@ -22,32 +21,18 @@ export async function POST(request: Request) {
       );
     }
 
-    // 2. Read request body
     const body = await request.json();
 
-    const {
-      noteId,
-      shareType,
-      accessType,
-      expiresAt,
-    } = body;
+    const { noteId, shareType, accessType, expiresAt } = body;
 
-    // 3. Validate required fields
     if (!noteId || !shareType || !accessType || !expiresAt) {
       return NextResponse.json(
-  {
-    message: "Share link created successfully",
-    shareLink: {
-      id: shareLink._id,
-      shareUrl,
-      shareType: shareLink.shareType,
-      accessType: shareLink.accessType,
-      expiresAt: shareLink.expiresAt,
-      accessKey,
-    },
-  },
-  { status: 201 }
-);
+        {
+          message:
+            "noteId, shareType, accessType and expiresAt are required",
+        },
+        { status: 400 }
+      );
     }
 
     if (!["one-time", "time-based"].includes(shareType)) {
@@ -64,10 +49,8 @@ export async function POST(request: Request) {
       );
     }
 
-    // 4. Connect to database
     await connectDB();
 
-    // 5. Make sure the note belongs to the logged-in user
     const note = await Note.findOne({
       _id: noteId,
       ownerId: session.user.id,
@@ -80,7 +63,6 @@ export async function POST(request: Request) {
       );
     }
 
-    // 6. Validate expiry
     const expiryDate = new Date(expiresAt);
 
     if (isNaN(expiryDate.getTime())) {
@@ -97,34 +79,45 @@ export async function POST(request: Request) {
       );
     }
 
-    // 7. Generate cryptographically secure token
+    // Generate secure share token
     const token = crypto.randomBytes(32).toString("base64url");
+
     let accessKey: string | undefined;
     let passwordHash: string | undefined;
-    if (accessType === "password") {
-        accessKey = crypto.randomBytes(16).toString("base64url");
-        passwordHash = await bcrypt.hash(accessKey, 12);
-}
-    // 8. Create ShareLink
-    const shareLink = await ShareLink.create({
-  noteId: note._id,
-  ownerId: session.user.id,
-  token,
-  shareType,
-  accessType,
-  expiresAt: expiryDate,
-  passwordHash,
-  viewCount: 0,
-  usedAt: null,
-  revokedAt: null,
-});
 
-    // 9. Return share URL
-    const shareUrl = new URL(`/share/${token}`, request.url).toString();
+    // Generate access key only for password-protected links
+    if (accessType === "password") {
+      accessKey = crypto.randomBytes(16).toString("base64url");
+
+      passwordHash = await bcrypt.hash(accessKey, 12);
+    }
+
+    // Create share link AFTER all values above have been prepared
+    const shareLink = await ShareLink.create({
+      noteId: note._id,
+      ownerId: session.user.id,
+      token,
+      shareType,
+      accessType,
+      expiresAt: expiryDate,
+      passwordHash,
+      viewCount: 0,
+      failedAttempts: 0,
+      lockedUntil: null,
+      usedAt: null,
+      revokedAt: null,
+    });
+
+    // Generate the share URL AFTER the share link/token exists
+    const shareUrl = new URL(
+      `/share/${token}`,
+      request.url
+    ).toString();
 
     return NextResponse.json(
       {
         message: "Share link created successfully",
+
         shareLink: {
           id: shareLink._id,
           shareUrl,
