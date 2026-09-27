@@ -35,19 +35,12 @@ export async function POST(request: Request) {
     // 3. Validate required fields
     if (!noteId || !shareType || !accessType || !expiresAt) {
       return NextResponse.json(
-  {
-    message: "Share link created successfully",
-    shareLink: {
-      id: shareLink._id,
-      shareUrl,
-      shareType: shareLink.shareType,
-      accessType: shareLink.accessType,
-      expiresAt: shareLink.expiresAt,
-      accessKey,
-    },
-  },
-  { status: 201 }
-);
+        {
+          message:
+            "noteId, shareType, accessType and expiresAt are required",
+        },
+        { status: 400 }
+      );
     }
 
     if (!["one-time", "time-based"].includes(shareType)) {
@@ -99,29 +92,45 @@ export async function POST(request: Request) {
 
     // 7. Generate cryptographically secure token
     const token = crypto.randomBytes(32).toString("base64url");
+
     let accessKey: string | undefined;
     let passwordHash: string | undefined;
+
     if (accessType === "password") {
-        accessKey = crypto.randomBytes(16).toString("base64url");
-        passwordHash = await bcrypt.hash(accessKey, 12);
-}
+      accessKey = crypto.randomBytes(16).toString("base64url");
+
+      passwordHash = await bcrypt.hash(accessKey, 12);
+    }
+
     // 8. Create ShareLink
     const shareLink = await ShareLink.create({
-  noteId: note._id,
-  ownerId: session.user.id,
-  token,
-  shareType,
-  accessType,
-  expiresAt: expiryDate,
-  passwordHash,
-  viewCount: 0,
-  usedAt: null,
-  revokedAt: null,
-});
+      noteId: note._id,
+      ownerId: session.user.id,
+      token,
+      shareType,
+      accessType,
+      expiresAt: expiryDate,
+      passwordHash,
 
-    // 9. Return share URL
-    const shareUrl = new URL(`/share/${token}`, request.url).toString();
+      // View tracking
+      viewCount: 0,
 
+      // Brute-force protection
+      failedAttempts: 0,
+      lockedUntil: null,
+
+      // Link state
+      usedAt: null,
+      revokedAt: null,
+    });
+
+    // 9. Generate share URL
+    const shareUrl = new URL(
+      `/share/${token}`,
+      request.url
+    ).toString();
+
+    // 10. Return share link details
     return NextResponse.json(
       {
         message: "Share link created successfully",
@@ -131,6 +140,8 @@ export async function POST(request: Request) {
           shareType: shareLink.shareType,
           accessType: shareLink.accessType,
           expiresAt: shareLink.expiresAt,
+
+          // Only returned for password-protected links
           accessKey,
         },
       },
